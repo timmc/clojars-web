@@ -11,7 +11,7 @@
                                    :username username
                                    :password password
                                    :pgp-key pgp-key}
-                         (new-user-validations confirm))]
+                         (new-user-validations nil confirm))]
     (response (register-form (apply concat (vals errors)) email username))
     (do (add-user email username password pgp-key)
         (workflow/make-auth {:identity username :username username}))))

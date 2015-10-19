@@ -58,7 +58,7 @@
       (press "Register")
       (has (status? 200))
       (within [:div.error :ul :li]
-              (has (text? "Username must consist only of lowercase letters, numbers, hyphens and underscores.Username can't be blank")))
+              (has (text? "Username can't be blank")))
       (fill-in "Username" "<script>")
       (fill-in "Password" "password")
       (fill-in "Confirm password" "password")
@@ -118,6 +118,46 @@
       (has (status? 200))
       (within [:div.error :ul :li]
               (has (text? "Email can't be blank")))))
+
+(deftest user-can-update-username
+  (-> (session web/clojars-app)
+      (register-as "fixture" "fixture@example.org" "password")
+      (follow-redirect)
+      (follow "profile")
+      (fill-in "Username" "fixture2")
+      (press "Update")
+      (follow-redirect)
+      (has (status? 200))
+      (within [:div#flash]
+        (has (text? "Your username was updated.")))
+      (fill-in "Username" "fixture2")
+      (fill-in "Password" "password")
+      (press "Login")
+      (follow-redirect)
+      (has (status? 200))
+      (within [:div.light-article :> :h1]
+        (has (text? "Dashboard (fixture2)")))))
+
+(deftest bad-username-should-show-error
+  (-> (session web/clojars-app)
+      (register-as "fixture" "fixture@example.org" "password")
+      (follow-redirect)
+      (follow "profile")
+      (has (status? 200))
+      (within [:title]
+              (has (text? "Profile - Clojars")))
+
+      (fill-in "Username" "groups")
+      (press "Update")
+      (has (status? 200))
+      (within [:div.error :ul :li]
+              (has (text? "Username is already taken")))
+
+      (fill-in "Username" "")
+      (press "Update")
+      (has (status? 200))
+      (within [:div.error :ul :li]
+              (has (text? "Username can't be blank")))))
 
 (deftest user-can-get-new-password
   (let [transport (promise)]

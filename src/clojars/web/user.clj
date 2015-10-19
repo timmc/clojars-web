@@ -1,8 +1,5 @@
 (ns clojars.web.user
-  (:require [clojars.db :as db :refer [find-user group-membernames add-user
-                                reserved-names update-user jars-by-username
-                                find-groupnames find-user-by-user-or-email
-                                rand-string]]
+  (:require [clojars.db :as db]
             [clojars.web.common :refer [html-doc error-list jar-link
                                         flash group-link]]
             [clojars.config :refer [config]]
@@ -55,26 +52,28 @@
   (and (.startsWith key "-----BEGIN PGP PUBLIC KEY BLOCK-----")
        (.endsWith key "-----END PGP PUBLIC KEY BLOCK-----")))
 
-(defn update-user-validations [confirm]
+(defn update-user-validations [account confirm]
   [[:email pred/present? "Email can't be blank"]
-   [:username #(re-matches #"[a-z0-9_-]+" %)
+   [:username pred/present? "Username can't be blank"]
+   [:username #(or (empty? %)
+                 (re-matches #"[a-z0-9_-]+" %))
     (str "Username must consist only of lowercase "
          "letters, numbers, hyphens and underscores.")]
-   [:username pred/present? "Username can't be blank"]
+   [:username #(or (= account %)
+                 (not (or (db/reserved-names %)
+                        (db/find-user %)
+                        (seq (db/group-membernames %)))))
+    "Username is already taken"]
    [:password #(= % confirm) "Password and confirm password must match"]
    [:pgp-key #(or (blank? %) (valid-pgp-key? %))
     "Invalid PGP public key"]])
 
-(defn new-user-validations [confirm]
-  (concat [[:password pred/present? "Password can't be blank"]
-           [:username #(not (or (reserved-names %)
-                                (find-user %)
-                                (seq (group-membernames %))))
-            "Username is already taken"]]
-          (update-user-validations confirm)))
+(defn new-user-validations [account confirm]
+  (concat [[:password pred/present? "Password can't be blank"]]
+          (update-user-validations account confirm)))
 
 (defn profile-form [account flash-msg & [errors]]
-  (let [user (find-user account)]
+  (let [user (db/find-user account)]
     (html-doc account "Profile"
               [:div.small-section
                (flash flash-msg)
@@ -88,6 +87,7 @@
                         [:input {:type :newusername :name :newusername :id :newusername
                                  :value (user :user)}]
                         (label :password "Password")
+                        [:p.hint "Only enter a password (and confirmation) to change your current one"]
                         (password-field :password)
                         (label :confirm "Confirm password")
                         (password-field :confirm)
@@ -102,16 +102,17 @@
                                      :username newusername
                                      :password password
                                      :pgp-key pgp-key}
-                           (if (= account newusername)
-                             (update-user-validations confirm)
-                             (new-user-validations confirm)))]
+                      (update-user-validations account confirm))]
       (profile-form account nil (apply concat (vals errors)))
-      (do (update-user account email newusername password pgp-key)
-          (if (= account newusername)
-            (assoc (redirect "/profile")
-              :flash "Profile updated.")
+      (do
+        (db/update-user account email password pgp-key)
+        (if (= account newusername)
+          (assoc (redirect "/profile")
+            :flash "Profile updated.")
+          (do
+            (db/update-username account newusername)
             (assoc (redirect "/login")
-              :flash "Your username was updated."))))))
+              :flash "Your username was updated.")))))))
 
 (defn show-user [account user]
   (html-doc account (user :user)
@@ -120,10 +121,10 @@
               (user :user)]
              [:div.col-sm-6.col-lg-6.col-xs-12.col-md-6
               [:h2 "Projects"]
-              (unordered-list (map jar-link (jars-by-username (user :user))))]
+              (unordered-list (map jar-link (db/jars-by-username (user :user))))]
              [:div.col-sm-6.col-lg-6.col-xs-12.col-md-6
               [:h2 "Groups"]
-              (unordered-list (map group-link (find-groupnames (user :user))))]]))
+              (unordered-list (map group-link (db/find-groupnames (user :user))))]]))
 
 (defn forgot-password-form []
   (html-doc nil "Forgot password?"
@@ -137,7 +138,7 @@
               (submit-button "Email me a password reset link"))]))
 
 (defn forgot-password [{:keys [email-or-username]}]
-  (when-let [user (find-user-by-user-or-email email-or-username)]
+  (when-let [user (db/find-user-by-user-or-email email-or-username)]
     (let [reset-code (db/set-password-reset-code! email-or-username)
           base-url (:base-url config)
           reset-password-url (str base-url "/password-resets/" reset-code)]

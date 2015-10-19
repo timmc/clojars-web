@@ -49,22 +49,40 @@
         pgp-key "aoeu"
         ms (long 0)
         email2 "test2@example.com"
-        name2 "testuser2"
         password2 "password2"
         pgp-key2 "aoeu2"]
     (with-redefs [db/get-time (fn [] (java.sql.Timestamp. ms))]
       (is (db/add-user email name password pgp-key))
       (with-redefs [db/get-time (fn [] (java.sql.Timestamp. (long 1)))]
-        (is (db/update-user name email2 name2 password2 pgp-key2))
+        (is (db/update-user name email2 password2 pgp-key2))
         (are [x] (submap {:email email2
-                          :user name2
+                          :user name
                           :pgp_key pgp-key2
                           :created ms}
                          x)
-             (db/find-user name2)
-             (db/find-user-by-user-or-email name2)
-             (db/find-user-by-user-or-email email2)))
-      (is (not (db/find-user name))))))
+             (db/find-user name)
+             (db/find-user-by-user-or-email name)
+             (db/find-user-by-user-or-email email2))))))
+
+(deftest updated-usernames-can-be-found
+  (let [name "testuser"
+        name2 "testuser2"]
+    (is (db/add-user "test@example.com" name "password" "pgp-key"))
+    (is (db/update-username name name2))
+    (is (db/find-user name2))
+    (is (db/find-user-by-user-or-email name2))
+    (is (not (db/find-user name)))))
+
+(deftest updating-username-changes-username-everywhere
+  (let [name "testuser"
+        name2 "testuser2"]
+    (db/add-user "test@example.com" name "password" "pgp-key")
+    (db/add-jar name {:group "com.example" :name "ham-biscuit" :version "0.1.0"})
+    ;; TODO: test for org.clojars.<name> changes once that is implemented
+    (is (db/update-username name name2))
+    (is (not (seq (db/find-groupnames name))))
+    (is (db/find-user-by-user-or-email name2))
+    (is (not (db/find-user name)))))
 
 (deftest added-users-are-added-only-to-their-org-clojars-group
   (let [email "test@example.com"

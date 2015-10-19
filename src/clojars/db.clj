@@ -35,11 +35,6 @@
        (map char)
        vec))
 
-(defn rand-string
-  "Generates a random string of [A-z0-9] of length n."
-  [n]
-  (str/join (repeatedly n #(rand-nth constituent-chars))))
-
 (defn get-time []
   (Date.))
 
@@ -255,45 +250,56 @@
   `(serialize-task* ~name
      (fn [] ~@body)))
 
+(defn add-clojars-group [username]
+  (let [group (str "org.clojars." username)]
+    (serialize-task :add-clojars-group
+      (insert groups (values {:name group
+                              :user username})))
+    (ev/record :membership {:group-id group
+                            :username username
+                            :added-by nil})))
+
 (defn add-user [email username password pgp-key]
   (let [record {:email email, :user username, :password (bcrypt password),
-                :pgp_key pgp-key}
-        group (str "org.clojars." username)]
+                :pgp_key pgp-key}]
     (serialize-task :add-user
       (insert users (values (assoc record
                               :created (get-time)
                               ;;TODO: remove salt and ssh_key field
                               :ssh_key ""
-                              :salt "")))
-      (insert groups (values {:name group :user username})))
+                              :salt ""))))
     (ev/record :user (clojure.set/rename-keys record {:user :username
                                                       :pgp_key :pgp-key}))
-    (ev/record :membership {:group-id group :username username :added-by nil})
+    (add-clojars-group username)
     record))
 
-(defn- update-username [account username]
-  (update jars
-    (set-fields {:user username})
-    (where {:user account}))
-  (update groups
-    (set-fields {:user username})
-    (where {:user account}))
-  (update groups
-    (set-fields {:added_by username})
-    (where {:added_by account})))
+(defn update-username [old-name new-name]
+  (serialize-task :update-new-name
+    (update users
+        (set-fields {:user new-name})
+        (where {:user old-name}))
+    (update jars
+      (set-fields {:user new-name})
+      (where {:user old-name}))
+    (update groups
+      (set-fields {:user new-name})
+      (where {:user old-name}))
+    (update groups
+      (set-fields {:added_by new-name})
+      (where {:added_by old-name})))
+  ;; TODO: record an event here if we ever go back to using the event log
+  )
 
-(defn update-user [account email username password pgp-key]
-  (let [fields {:email email
-                :user username
-                :pgp_key pgp-key}
-        fields (if (empty? password)
-                 fields
-                 (assoc fields :password (bcrypt password)))]
+(defn update-user [account email password pgp-key]
+  (let [fields  (cond-> {:email email
+                         :pgp_key pgp-key
+                         :salt ""
+                         :ssh_key ""}
+                  (not (empty? password)) (assoc :password (bcrypt password)))]
     (serialize-task :update-user
       (update users
-        (set-fields (assoc fields :salt "" :ssh_key ""))
-        (where {:user account}))
-      (update-username account username))
+        (set-fields fields)
+        (where {:user account})))
     (ev/record :user (clojure.set/rename-keys fields {:user :username
                                                       :pgp_key :pgp-key}))
     fields))
