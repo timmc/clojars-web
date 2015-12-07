@@ -58,7 +58,7 @@
   (db/add-user help/*db* "test@ex.com" "testuser" "password"
                (slurp (io/resource "pubring.gpg")))
   (db/add-member help/*db* "robert" "testuser" nil)
-  ;; TODO: fix this - the test files are for 1.1.2, but the pom has 1.2.0,
+  ;; FIXME: the test files are for 1.1.2, but the pom has 1.2.0,
   ;; and promote/blockers reads the pom to get the version, and expects
   ;; that version to be in the db
   (db/add-jar help/*db* "testuser" {:group "robert" :name "hooke" :version "1.2.0"})
@@ -113,3 +113,35 @@
                "Ensure your public key is in your profile.")]
          (blockers help/*db*
                    {:group "robert" :name "hooke" :version "1.1.2"}))))
+
+(letfn [(setup-source-repo []
+          (copy-resource "1.1.2")
+          (io/copy "dummy hooke jar file"
+                   (file-for "robert" "hooke" "1.1.2" "jar"))
+          (copy-resource "1.1.2" "jar.asc")
+          (copy-resource "1.1.2" "pom.asc")
+          (doseq [file-suffix ["jar" "pom"]
+                  sum-suffix ["" ".asc"]
+                  sig-suffix [".md5" ".sha1"]]
+            (io/copy "dummy sig" (file-for "robert" "hooke" "1.1.2"
+                                           (str file-suffix sum-suffix sig-suffix))))
+          (db/add-user help/*db* "test@ex.com" "testuser" "password"
+                       (slurp (io/resource "pubring.gpg")))
+          (db/add-member help/*db* "robert" "testuser" nil)
+          (db/add-jar help/*db* "testuser" {:group "robert" :name "hooke" :version "1.1.2"}))]
+
+  (deftest promote-should-copy-to-releases-repo
+    (setup-source-repo)
+    (promote help/*db* {:group "robert" :name "hooke" :version "1.1.2"})
+    (doseq [f (for [file-suffix [".jar" ".pom"]
+                    sum-suffix ["" ".asc"]
+                    sig-suffix ["" ".md5" ".sha1"]]
+                (io/file (config :releases-repo) "robert" "hooke" "1.1.2"
+                         (str "hooke-1.1.2" file-suffix sum-suffix sig-suffix)))]
+      (is (.exists f))))
+
+  (deftest promote-should-write-to-db-on-success
+    (setup-source-repo)
+    (is (not (db/promoted? help/*db* "robert" "hooke" "1.1.2")))
+    (promote help/*db* {:group "robert" :name "hooke" :version "1.1.2"})
+    (is (db/promoted? help/*db* "robert" "hooke" "1.1.2"))))

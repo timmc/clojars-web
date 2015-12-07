@@ -118,25 +118,28 @@
   (assoc files [(symbol group name) version :extension extension]
          (file-for group name version extension)))
 
-(defn- deploy-to-s3 [info]
+(defn- deploy-to-repo [repo info]
   (let [files (reduce (partial add-coords info) {}
-                      ["jar" "jar.asc" "pom" "pom.asc"])
-        releases-repo {:url (config :releases-url)
-                       :username (config :releases-access-key)
-                       :passphrase (config :releases-secret-key)}]
+                      ["jar" "jar.asc" "pom" "pom.asc"])]
     (aether/deploy-artifacts :artifacts (keys files)
                              :files files
                              :transfer-listener :stdout
-                             :repository {"releases" releases-repo})))
+                             :repository {"releases" repo})))
 
 (defn promote [db {:keys [group name version] :as info}]
   (println "checking" group "/" name "for promotion...")
-  (let [blockers (blockers db info)]
+  (let [blockers (blockers db info)
+        releases-repo (config :releases-repo)]
     (if (empty? blockers)
-      (if (config :releases-url)
-        (do
+      (if releases-repo
+        (let [releases-repo-file (doto (io/file releases-repo)
+                                   .mkdirs)]
           (println "Promoting" info)
-          (deploy-to-s3 info)
+          #_(deploy-to-repo {:url (config :releases-url)
+                             :username (config :releases-access-key)
+                             :passphrase (config :releases-secret-key)}
+                            info)
+          (deploy-to-repo {:url (.toURL releases-repo-file)} info)
           (db/promote db group name version))
         (println "Didn't promote since :releases-url wasn't set."))
       (do (println "...failed.")

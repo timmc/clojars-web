@@ -27,6 +27,7 @@
                        :subprotocol "sqlite"
                        :subname ":memory:"}
                   :repo "data/test/repo"
+                  :releases-repo "data/test/releases_repo"
                   :bcrypt-work-factor 12})
 
 (defn using-test-config [f]
